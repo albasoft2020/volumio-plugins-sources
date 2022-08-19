@@ -36,7 +36,7 @@
 		"v-conf": "^0.10.0"
 	},
 	"repository": "https://github.com/Saiyato/volumio-lastfm-plugin",
-	"keywords": [	
+	"keywords": [
 		"fm",
 		"lastfm",
 		"last",
