@@ -226,10 +226,10 @@ ControllerLastFM.prototype.addToBrowseSources = function () {
     var data = { 
 		name: 'LastFM', 
 		uri: 'lastfm', 
-		plugin_type: 'miscellanea', 
+		plugin_type: 'user_interface', 
 		plugin_name: 'lastfm',
 		icon: 'fa fa-lastfm',
-		albumart: '/albumart?sourceicon=miscellanea/lastfm/lastfm_fill.svg'
+		albumart: '/albumart?sourceicon=user_interface/lastfm/lastfm_fill.svg'
 		};
     this.commandRouter.volumioAddToBrowseSources(data);
 };
@@ -303,7 +303,7 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
 ControllerLastFM.prototype.getAlbumArt = function (data, path, icon) {
   if (this.albumArtPlugin == undefined) {
     // initialization, skipped from second call
-    this.albumArtPlugin = this.commandRouter.pluginManager.getPlugin('miscellanea', 'albumart');
+    this.albumArtPlugin = this.commandRouter.pluginManager.getPlugin('user_interface', 'albumart');
   }
 
   if (this.albumArtPlugin) { return this.albumArtPlugin.getAlbumArt(data, path, icon); } else {
