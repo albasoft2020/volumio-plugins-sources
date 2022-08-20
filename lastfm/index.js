@@ -1,6 +1,5 @@
 'use strict';
 
-var config = new (require('v-conf'))();
 var crypto = require('crypto');
 var fs = require('fs-extra');
 var http = require('http');
@@ -9,11 +8,9 @@ var pTimer = require('./pausableTimer');
 var socket = io.connect('http://localhost:3000');
 var lastfm = require("simple-lastfm");
 var libQ = require('kew');
-var net = require('net');
-var os = require('os');
 
 var blacklistedServices; // = ['webradio'];
-var scrobbleThresholdSong = 500;  // as fraction of the song duration
+var scrobbleThresholdSong = 500;  // fraction (here 50%) of the song duration multiplied by 1000
 var scrobbleThresholdStream = 60000; // in milliseconds, so this default is 60s
 
 var debugEnabled = false;
@@ -104,12 +101,9 @@ ControllerLastFM.prototype.onStart = function() {
 
     self.initScrobbleSettings();
     self.initLastFMSession().then(result => self.logger.info('[LastFM] finished init: ' + result), error => self.logger.info('[LastFM] finished init with error: ' + error) );
-    self.logger.info('[LastFM] Left init routine');
- 
-	self.logger.info('[LastFM] Socket already connected: ' + socket.connected);
-     // start monitoring the Volumio state to check what song is playing and scrobble it:
+
+    // start monitoring the Volumio state to check what song is playing and scrobble it:
     socket.on('pushState', function (state) { self.checkStateUpdate(state); });
-	// self.logger.info('[LastFM] Now it should be: ' + socket.connected); // It's not! Takes a while...
 	
 	// Initialize with the correct settings
 	self.updateCompositeTitleSettings(self.config.get('titleSeparator'), self.config.get('artistFirst'));
@@ -303,7 +297,7 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
 ControllerLastFM.prototype.getAlbumArt = function (data, path, icon) {
   if (this.albumArtPlugin == undefined) {
     // initialization, skipped from second call
-    this.albumArtPlugin = this.commandRouter.pluginManager.getPlugin('user_interface', 'albumart');
+    this.albumArtPlugin = this.commandRouter.pluginManager.getPlugin('miscellanea', 'albumart');
   }
 
   if (this.albumArtPlugin) { return this.albumArtPlugin.getAlbumArt(data, path, icon); } else {
@@ -335,9 +329,12 @@ ControllerLastFM.prototype.getSimilarArtists = function(uri) {
             },                 
             info: { 
                 uri: "search/artist/" + self.scrobbleData.artist, 
-                title: 'Similar artists to ' + self.scrobbleData.artist, 
+//                title: 'Similar artists to ' + self.scrobbleData.artist, 
+                album: 'Similar artists to ' + self.scrobbleData.artist,
+                artist: 'Testing artist',
+                duration: 'Testing duration',
                 service: 'lastfm', 
-                type: 'artist', 
+                type: 'album', 
                 albumart: artworkSearchedArtist 
             } 
         }
@@ -546,38 +543,6 @@ ControllerLastFM.prototype.checkURL = function(url)
 		defer.reject();
 	}
 	
-	return defer.promise;
-};
-
-ControllerLastFM.prototype.fetchArtwork = function(mbid)
-{
-	var self = this;
-	var defer = libQ.defer();
-	var url = 'webservice.fanart.tv';
-	var apikey = '';
-	var options = {host: url, port: 80, path: '/v3/music/' + mbid + '&?api_key=' + apikey + '&format=json'};
-	
-	try
-	{
-		http.get(options, function(res) {
-			var body = '';
-			res.on('data', function(chunk) {
-				body += chunk;
-			});
-			res.on('error', function(err) {
-				self.logger.error('[LastFM] Artwork lookup failed. ' + err);
-			});
-			res.on('end', function() {
-				self.logger.info(body);
-				defer.resolve(body);
-			});
-		});
-	}
-	catch (ex)
-	{
-		self.logger.error('[LastFM] Could not complete artwork lookup. ' + ex);
-		defer.reject();
-	}
 	return defer.promise;
 };
 
@@ -824,47 +789,37 @@ ControllerLastFM.prototype.checkStateUpdate = function (state) {
             if (scrobbleThresholdInMilliseconds > 0) {
                 // Should be the case if scrobbling from the active service has been enabled
                 if (self.formatScrobbleData(state)) { // Enough metadata to be able to scrobble the track
-                    self.updateNowPlaying();
                     if (debugEnabled)
                         self.logger.info('[LastFM] starting new timer for ' + scrobbleThresholdInMilliseconds + ' milliseconds [' + state.artist + ' - ' + state.title + '].');
                     self.startScrobbleTimer(scrobbleThresholdInMilliseconds, state);
-//                    if (state.duration == 0) {
-//                        // try to update title/artist with split version
-//                        if (debugEnabled)
-//                            self.logger.info('[LastFM] Init update of webradio metadata ');                        
-//                        // Wait a bit before updating (as pushed state updates mostly seem to appear in pairs, i.e. posting the same state twice
-//                        // so if we update to immediately it will toggle a 2nd time between original and corrected version
-//                        setTimeout(() => {  
-//                            state.artist = self.scrobbleData.artist;
-//                            state.title = self.scrobbleData.title;
-//                            self.previousState = state;
-//                            self.commandRouter.servicePushState(state, 'mpd'); 
-////                            if (debugEnabled)
-////                                self.logger.info('[LastFM] Updated webradio metadata to ', state); 
-//                        }, 200);
-                }
+
                     self.updateNowPlaying().then(
-                            updated => {
-                                if (state.duration == 0){
-                                    state.artist = self.scrobbleData.artist;
-                                    state.title = self.scrobbleData.title;
-                                    let MetaData = [];
-                                    MetaData.push({tag: "Artist", value: self.scrobbleData.artist});
-                                    MetaData.push({tag: "title", value: self.scrobbleData.title});
-                                    // does not really help to reset timer; have to check how to do this
-                                    //state.seek = Math.floor(Date.now()/1000) - trackStartTime;
-                                    if (updated) {
-                                        state.duration = self.scrobbleData.duration/1000;
-                                        state.album = self.scrobbleData.album;
-                                        if (self.scrobbleData.album) MetaData.push({tag: "Album", value: self.scrobbleData.album});
-            }
-                                    self.previousState = state;
-                                    if (debugEnabled)
-                                        self.logger.info('[LastFM] Updated webradio using lastFM metadata to ', state); 
-                                    self.commandRouter.servicePushState(state, 'mpd');           
-                                    //self.commandRouter.executeOnPlugin('music_service', 'mpd', 'setMpdTrackMetaData', MetaData);
-        }
-                            });
+                        updated => 
+                        {
+                            if (state.duration == 0)
+                            {
+                                state.artist = self.scrobbleData.artist;
+                                state.title = self.scrobbleData.title;
+                                let MetaData = [];
+                                MetaData.push({tag: "Artist", value: self.scrobbleData.artist});
+                                MetaData.push({tag: "title", value: self.scrobbleData.title});
+                                // does not really help to reset timer; have to check how to do this
+                                //state.seek = Math.floor(Date.now()/1000) - trackStartTime;
+                                if (updated) 
+                                {
+                                    state.duration = self.scrobbleData.duration/1000;
+                                    state.album = self.scrobbleData.album;
+                                    if (self.scrobbleData.album) MetaData.push({tag: "Album", value: self.scrobbleData.album});
+                                }
+                                self.previousState = state;
+                                if (debugEnabled)
+                                    self.logger.info('[LastFM] Updated webradio using lastFM metadata to ', state); 
+                                self.commandRouter.servicePushState(state, 'mpd');           
+                                //self.commandRouter.executeOnPlugin('music_service', 'mpd', 'setMpdTrackMetaData', MetaData);
+                            }
+                        }
+                    );
+                }
             }
         }
         // set state as the new previous state
