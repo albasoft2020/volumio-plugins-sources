@@ -264,16 +264,26 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
       lists: [
         {
           availableListViews: [
-            'grid', 'list',
+            'grid', 'list'
           ],
           items: [
-          ],
-        },
+          ]
+        }
       ],
       prev: {
-        uri: '/',
-      },
-    },
+        uri: '/'
+      },                 
+        info: { 
+            uri: "search/artist/" + self.scrobbleData.artist, 
+    //                title: 'Similar artists to ' + self.scrobbleData.artist, 
+            album: 'Now playing ' + self.scrobbleData.title,
+            artist: self.scrobbleData.artist,
+            duration: self.scrobbleData.duration/1000 + 's',
+            service: 'lastfm', 
+            type: 'album'//, 
+            //albumart: artworkSearchedArtist 
+        } 
+    }
   };
 
   for (var f in self.fTree) {
@@ -286,7 +296,7 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
       album: '',
       icon: self.fTree[f].icon,
 	  albumart: '',
-      uri: 'lastfm/' + self.fTree[f].uri,
+      uri: 'lastfm/' + self.fTree[f].uri
     });
   }
   defer.resolve(rootTree);
@@ -1125,6 +1135,7 @@ ControllerLastFM.prototype.scrobble = function ()
                         self.commandRouter.pushToastMessage('success', 'Scrobble succesful', 'Scrobbled: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
                     if (debugEnabled)
                         self.logger.info('[LastFM] Scrobble successful for: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
+//                        self.logger.info('[LastFM] Scrobble successful: ' + JSON.stringify(result));
                 }
                 else
 				{
