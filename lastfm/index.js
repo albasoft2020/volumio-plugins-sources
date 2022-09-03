@@ -21,7 +21,7 @@ var compositeTitle =
             separator: " - ",
             indexOfArtist: 0,
             indexOfTitle: 1
-        }
+        };
 
 var StationNames = ["Jazz FM", "Jazz FM Premium"];
 var trackStartTime = 0;
@@ -601,9 +601,14 @@ ControllerLastFM.prototype.updateCredentials = function (data)
 	self.config.set('authToken', md5(data['username'] + md5(data['password'])));
 	
     // Should init new LastFM session after credentials were updated.
-    self.initLastFMSession();
+    self.initLastFMSession()
+        .then(sk => 
+            {
+                self.config.set('sessionKey', sk);     
+                defer.resolve(sk);
+            })
+        .fail(defer.reject());
     // To-Do: check that session has started properly...
-    defer.resolve();
 		
 	return defer.promise;
 };
@@ -945,9 +950,7 @@ ControllerLastFM.prototype.initLastFMSession = function () {
                 self.commandRouter.pushToastMessage('success', 'LastFM connection', 'Authenticated successfully with LastFM.');
                 if (debugEnabled)
                     self.logger.info('[LastFM] authenticated successfully!');
-                // remove this after testing!!!
-                self.logger.info('[LastFM] session key: ' + result.session_key);
-                defer.resolve('Authenticated successfully!');
+                defer.resolve(result.session_key);
             }
             else
 			{

@@ -19,6 +19,10 @@
     "type": "string",
     "value": ""
   },
+  "sessionKey": {
+  "type": "string",
+  "value": ""
+  },
   "blacklistedServices": {
     "type": "string",
     "value": ""
