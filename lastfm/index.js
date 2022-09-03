@@ -255,11 +255,15 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
   var self = this;
   self.fTree = [ 
 		{ label: 'Similar Artists', uri: 'similar_artist', icon: 'fa fa-users'},
-		{ label: 'Similar Tracks', uri: 'similar_tracks', icon: 'fa fa-music'}
+		{ label: 'Similar Tracks', uri: 'similar_tracks', icon: 'fa fa-music'}//,
+//		{ label: 'Settings', uri: 'settings', icon: 'fa fa-gears'}
 	];
   var defer = libQ.defer();
 
-  var rootTree = {
+//  let duration = '';
+//  if (self.scrobbleData.duration) duration = self.scrobbleData.duration/1000 + 's';
+//  
+    var rootTree = {
     navigation: {
       lists: [
         {
@@ -275,17 +279,18 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
       },                 
         info: { 
             uri: "search/artist/" + self.scrobbleData.artist, 
-    //                title: 'Similar artists to ' + self.scrobbleData.artist, 
-            album: 'Now playing ' + self.scrobbleData.title,
+//            title: 'Now playing "' + self.scrobbleData.title + '"', 
+            album: 'Now playing "' + self.scrobbleData.title + '"',
             artist: self.scrobbleData.artist,
-            duration: self.scrobbleData.duration/1000 + 's',
+    //        duration: duration,
             service: 'lastfm', 
             type: 'album'//, 
             //albumart: artworkSearchedArtist 
         } 
     }
   };
-
+  if (self.scrobbleData.duration) rootTree.navigation.info.duration = self.scrobbleData.duration/1000 + 's';
+  
   for (var f in self.fTree) {
     
     rootTree.navigation.lists[0].items.push({
@@ -341,8 +346,10 @@ ControllerLastFM.prototype.getSimilarArtists = function(uri) {
                 uri: "search/artist/" + self.scrobbleData.artist, 
 //                title: 'Similar artists to ' + self.scrobbleData.artist, 
                 album: 'Similar artists to ' + self.scrobbleData.artist,
-                artist: 'Testing artist',
-                duration: 'Testing duration',
+                artist: "Info about artist?",
+                duration: 'duration',
+                year: 'Year or user play count?',
+                genre: 'Genre or userloved?',
                 service: 'lastfm', 
                 type: 'album', 
                 albumart: artworkSearchedArtist 
