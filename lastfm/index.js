@@ -7,6 +7,7 @@ var io = require('socket.io-client');
 var pTimer = require('./pausableTimer');
 var socket = io.connect('http://localhost:3000');
 var lastfm = require("simple-lastfm");
+var LastfmAPI = require('./lib/lastfmPromises');
 var libQ = require('kew');
 
 var blacklistedServices; // = ['webradio'];
@@ -608,7 +609,7 @@ ControllerLastFM.prototype.updateCredentials = function (data)
 	self.config.set('authToken', md5(data['username'] + md5(data['password'])));
 	
     // Should init new LastFM session after credentials were updated.
-    self.initLastFMSession()
+    self.initLastFMSession(data['password'])
         .then(sk => 
             {
                 self.config.set('sessionKey', sk);     
@@ -927,7 +928,7 @@ ControllerLastFM.prototype.formatScrobbleData = function (state)
 	return success;
 };
 
-ControllerLastFM.prototype.initLastFMSession = function () {
+ControllerLastFM.prototype.initLastFMSession = function (passwd) {
     var self = this;
 	var defer = libQ.defer();
     
@@ -937,36 +938,58 @@ ControllerLastFM.prototype.initLastFMSession = function () {
         (self.config.get('API_KEY') != '') &&
         (self.config.get('API_SECRET') != '') &&
         (self.config.get('username') != '') &&
-        (self.config.get('authToken') != '')
+        ((self.config.get('sessionKey') != '') ||(passwd != ''))
     )
 	{
         if (debugEnabled)
             self.logger.info('[LastFM] trying to authenticate...');
 
-        self.lfm = new lastfm({
-            api_key: self.config.get('API_KEY'),
-            api_secret: self.config.get('API_SECRET'),
-            username: self.config.get('username'),
-            authToken: self.config.get('authToken')
+//        self.lfm = new lastfm({
+//            api_key: self.config.get('API_KEY'),
+//            api_secret: self.config.get('API_SECRET'),
+//            username: self.config.get('username'),
+//            authToken: self.config.get('authToken')
+//        });
+        self.lfm = new LastfmAPI({
+            'api_key' : self.config.get('API_KEY'),
+            'secret' : self.config.get('API_SECRET')
         });
 
-        self.lfm.getSessionKey(function (result)
-		{
-            if (result.success)
-			{
-                self.commandRouter.pushToastMessage('success', 'LastFM connection', 'Authenticated successfully with LastFM.');
-                if (debugEnabled)
-                    self.logger.info('[LastFM] authenticated successfully!');
-                defer.resolve(result.session_key);
-            }
-            else
-			{
-                msg = 'Error: ' + result.error;
-                self.commandRouter.pushToastMessage('error', 'LastFM connection failed', msg);                    
-                self.logger.error('[LastFM] ' + msg); 
-                defer.reject(msg);
-            }
-        });
+        if(self.config.get('sessionKey') != '') 
+            self.lfm.setSessionCredentials(self.config.get('username'), self.config.get('sessionKey'));
+        else {
+            self.lfm.getMobileSession(self.config.get('username'), passwd)
+                .then(session => {
+                    self.commandRouter.pushToastMessage('success', 'LastFM connection', 'Authenticated successfully with LastFM.');
+                    if (debugEnabled)
+                        self.logger.info('[LastFM] authenticated successfully!');
+                    defer.resolve(session.key);                        
+                })
+                .fail(err => {
+                    msg = 'Error: ' + err;
+                    self.commandRouter.pushToastMessage('error', 'LastFM connection failed', msg);                    
+                    self.logger.error('[LastFM] ' + msg); 
+                    defer.reject(msg);
+                });
+        }
+
+//        self.lfm.getSessionKey(function (result)
+//		{
+//            if (result.success)
+//			{
+//                self.commandRouter.pushToastMessage('success', 'LastFM connection', 'Authenticated successfully with LastFM.');
+//                if (debugEnabled)
+//                    self.logger.info('[LastFM] authenticated successfully!');
+//                defer.resolve(result.session_key);
+//            }
+//            else
+//			{
+//                msg = 'Error: ' + result.error;
+//                self.commandRouter.pushToastMessage('error', 'LastFM connection failed', msg);                    
+//                self.logger.error('[LastFM] ' + msg); 
+//                defer.reject(msg);
+//            }
+//        });
     }
     else
 	{
@@ -1051,60 +1074,89 @@ ControllerLastFM.prototype.updateNowPlaying = function ()
         self.updatingNowPlaying = true;
 
         // Try to fetch track info
+//        self.lfm.getTrackInfo({
+//            artist: self.scrobbleData.artist,
+//            track: self.scrobbleData.title,
+//            autocorrect: 1,
+//            callback: function (result)
+//			{
+//                if (result.success)
+//				{
+//                    // Display results to start with
+//                    self.logger.info('[LastFM] track info: ' + JSON.stringify(result));
+//                    let updated = false;
+//                    if (result.trackInfo.duration != undefined)
+//					{
+//                        if (self.scrobbleData.duration == 0)
+//						{
+//                            self.scrobbleData.duration = result.trackInfo.duration;
+//                            self.logger.info('[LastFM] Updated missing track duration: ' + result.trackInfo.duration);
+//                            updated = true;
+//                        }
+//                    }
+//                    if (!self.scrobbleData.album && (result.trackInfo.album != undefined) && (result.trackInfo.album.title != undefined))
+//					{
+//                        self.scrobbleData.album = result.trackInfo.album.title;
+//                        self.logger.info('[LastFM] Updated missing track album: ' + self.scrobbleData.album);
+//                        updated = true;
+//                    }
+//                    defer.resolve(updated);
+//                }
+//                else 
+//                {
+//                    self.logger.error('[LastFM] track info request failed with error: ' + result.error);
+//                    defer.resolve(false);  // also use resolve here, as reaction to promise should be the same right now
+//                }
+//            }
+//        });
         self.lfm.getTrackInfo({
             artist: self.scrobbleData.artist,
             track: self.scrobbleData.title,
-            autocorrect: 1,
-            callback: function (result)
-			{
-                if (result.success)
-				{
-                    // Display results to start with
-                    self.logger.info('[LastFM] track info: ' + JSON.stringify(result));
+            autocorrect: 1})
+                .then(trackInfo => {
+                    self.logger.info('[LastFM] track info: ' + JSON.stringify(trackInfo));
                     let updated = false;
-                    if (result.trackInfo.duration != undefined)
+                    if (trackInfo.duration != undefined)
 					{
                         if (self.scrobbleData.duration == 0)
 						{
-                            self.scrobbleData.duration = result.trackInfo.duration;
-                            self.logger.info('[LastFM] Updated missing track duration: ' + result.trackInfo.duration);
+                            self.scrobbleData.duration = trackInfo.duration;
+                            self.logger.info('[LastFM] Updated missing track duration: ' + trackInfo.duration);
                             updated = true;
                         }
                     }
-                    if (!self.scrobbleData.album && (result.trackInfo.album != undefined) && (result.trackInfo.album.title != undefined))
+                    if (!self.scrobbleData.album && (trackInfo.album != undefined) && (trackInfo.album.title != undefined))
 					{
-                        self.scrobbleData.album = result.trackInfo.album.title;
+                        self.scrobbleData.album = trackInfo.album.title;
                         self.logger.info('[LastFM] Updated missing track album: ' + self.scrobbleData.album);
                         updated = true;
                     }
-                    defer.resolve(updated);
-                }
-                else 
-                {
-                    self.logger.error('[LastFM] track info request failed with error: ' + result.error);
-                    defer.resolve(false);  // also use resolve here, as reaction to promise should be the same right now
-                }
-            }
-        });
+                    defer.resolve(updated);                
+                })
+                .fail(err => {
+                    self.logger.error('[LastFM] track info request failed with error: ' + err);
+                    defer.resolve(false);  // also use resolve here, as reaction to promise should be the same right now                    
+                });
+        
 
-        // Used to notify Last.fm that a user has started listening to a track. Parameter names are case sensitive.
-        self.lfm.scrobbleNowPlayingTrack({
-            artist: self.scrobbleData.artist,
-            track: self.scrobbleData.title,
-            album: self.scrobbleData.album,
-            duration: self.scrobbleData.duration,
-            callback: function (result)
-			{
-                if (!result.success)
-                    console.log('[LastFM] updated "now playing" failed: ', result);
-                else
-				{
-                    if (debugEnabled)
-                        self.logger.info('[LastFM] updated "now playing" | artist: ' + self.scrobbleData.artist + ' | title: ' + self.scrobbleData.title);
-                }
-                self.updatingNowPlaying = false;
-            }
-        });
+//        // Used to notify Last.fm that a user has started listening to a track. Parameter names are case sensitive.
+//        self.lfm.scrobbleNowPlayingTrack({
+//            artist: self.scrobbleData.artist,
+//            track: self.scrobbleData.title,
+//            album: self.scrobbleData.album,
+//            duration: self.scrobbleData.duration,
+//            callback: function (result)
+//			{
+//                if (!result.success)
+//                    console.log('[LastFM] updated "now playing" failed: ', result);
+//                else
+//				{
+//                    if (debugEnabled)
+//                        self.logger.info('[LastFM] updated "now playing" | artist: ' + self.scrobbleData.artist + ' | title: ' + self.scrobbleData.title);
+//                }
+//                self.updatingNowPlaying = false;
+//            }
+//        });
     }
 	else
 	{
@@ -1130,33 +1182,57 @@ ControllerLastFM.prototype.scrobble = function ()
 		if(debugEnabled)
 			self.logger.info('[LastFM] preparing to scrobble...');
 
-		self.lfm.scrobbleTrack({
+//		self.lfm.scrobbleTrack({
+//			artist: self.scrobbleData.artist,
+//			track: self.scrobbleData.title,
+//			album: self.scrobbleData.album,
+//            timestamp: trackStartTime,
+//			callback: function(result)
+//			{
+//                if (result.success)
+//				{
+//                    if (self.scrobbleData.album == undefined || self.scrobbleData.album == '')
+//                        self.scrobbleData.album = '[unknown album]';
+//                    if (self.config.get('pushToastOnScrobble'))
+//                        self.commandRouter.pushToastMessage('success', 'Scrobble succesful', 'Scrobbled: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
+//                    if (debugEnabled)
+//                        self.logger.info('[LastFM] Scrobble successful for: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
+////                        self.logger.info('[LastFM] Scrobble successful: ' + JSON.stringify(result));
+//                }
+//                else
+//				{
+//                    console.log("in callback, finished: ", result);
+//                    if (self.config.get('pushToastOnScrobble'))
+//                        self.commandRouter.pushToastMessage('error', 'Scrobble failed', 'Tried to scrobbled: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
+//                    if (debugEnabled)
+//                        self.logger.info('[LastFM] Scrobble failed for: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
+//                }
+//			}
+//		});	
+//		
+// lfm.scrobble(track).then(resp => console.log(resp.scrobble.artist['#text']+ ' - ' + (resp.scrobble.album['#text'] || 'unknown' )));
+		self.lfm.scrobble({
 			artist: self.scrobbleData.artist,
 			track: self.scrobbleData.title,
 			album: self.scrobbleData.album,
-            timestamp: trackStartTime,
-			callback: function(result)
-			{
-                if (result.success)
-				{
+            timestamp: trackStartTime})
+                .then(result => {
                     if (self.scrobbleData.album == undefined || self.scrobbleData.album == '')
                         self.scrobbleData.album = '[unknown album]';
                     if (self.config.get('pushToastOnScrobble'))
                         self.commandRouter.pushToastMessage('success', 'Scrobble succesful', 'Scrobbled: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
                     if (debugEnabled)
                         self.logger.info('[LastFM] Scrobble successful for: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
-//                        self.logger.info('[LastFM] Scrobble successful: ' + JSON.stringify(result));
-                }
-                else
-				{
-                    console.log("in callback, finished: ", result);
+                })
+                .fail(err => {
+                   console.log("in callback, finished: ", err);
                     if (self.config.get('pushToastOnScrobble'))
                         self.commandRouter.pushToastMessage('error', 'Scrobble failed', 'Tried to scrobbled: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
                     if (debugEnabled)
                         self.logger.info('[LastFM] Scrobble failed for: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
-                }
-			}
-		});	
+                });
+                
+	
 		self.previousScrobble.artist = self.scrobbleData.artist;
         self.previousScrobble.title = self.scrobbleData.title;
         self.previousScrobble.scrobbleTime = trackStartTime;
