@@ -955,8 +955,10 @@ ControllerLastFM.prototype.initLastFMSession = function (passwd) {
             'secret' : self.config.get('API_SECRET')
         });
 
-        if(self.config.get('sessionKey') != '') 
+        if(self.config.get('sessionKey') != ''){
+            if (debugEnabled) self.logger.info('[LastFM] Used sessionkey');
             self.lfm.setSessionCredentials(self.config.get('username'), self.config.get('sessionKey'));
+        }
         else {
             self.lfm.getMobileSession(self.config.get('username'), passwd)
                 .then(session => {
@@ -1038,7 +1040,7 @@ ControllerLastFM.prototype.processScrobbleCache = function(data) {
 //                    self.logger.info('[LastFM] scrobble data: ' + JSON.stringify(self.scrobbleData)+ ', timestamp: ' + trackStartTime);
                     self.scrobble();
                 }
-                // delete cache (should real check whether the scrobbling actually worked...)
+                // delete cache (should really check whether the scrobbling actually worked...)
                 fs.unlink(path, function (err) {
                     if (err) {
                         self.logger.error('[LastFM] Failed to delete the cache file...');
@@ -1116,7 +1118,7 @@ ControllerLastFM.prototype.updateNowPlaying = function ()
                 .then(trackInfo => {
                     self.logger.info('[LastFM] track info: ' + JSON.stringify(trackInfo));
                     let updated = false;
-                    if (trackInfo.duration != undefined)
+                    if ((trackInfo.duration != undefined) && (trackInfo.duration > 0))
 					{
                         if (self.scrobbleData.duration == 0)
 						{
@@ -1157,6 +1159,20 @@ ControllerLastFM.prototype.updateNowPlaying = function ()
 //                self.updatingNowPlaying = false;
 //            }
 //        });
+
+        // Used to notify Last.fm that a user has started listening to a track. Parameter names are case sensitive.
+        self.lfm.updateNowPlaying({
+            artist: self.scrobbleData.artist,
+            track: self.scrobbleData.title,
+            album: self.scrobbleData.album,
+            duration: self.scrobbleData.duration})
+                .then(result => {
+                    if (debugEnabled)
+                        self.logger.info('[LastFM] updated "now playing" | artist: ' + self.scrobbleData.artist + ' | title: ' + self.scrobbleData.title);
+                    self.updatingNowPlaying = false;
+                })
+                .fail(err => {
+                });
     }
 	else
 	{
