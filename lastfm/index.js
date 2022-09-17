@@ -27,6 +27,8 @@ var compositeTitle =
 var StationNames = ["Jazz FM", "Jazz FM Premium"];
 var trackStartTime = 0;
 
+let nowPlayingTrackInfo = {};
+
 // Define the ControllerLastFM class
 module.exports = ControllerLastFM;
 
@@ -284,6 +286,8 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
             album: 'Now playing "' + self.scrobbleData.title + '"',
             artist: self.scrobbleData.artist,
     //        duration: duration,
+    //        year: '',
+    //        genre: '',
             service: 'lastfm', 
             type: 'album'//, 
             //albumart: artworkSearchedArtist 
@@ -291,6 +295,8 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
     }
   };
   if (self.scrobbleData.duration) rootTree.navigation.info.duration = self.scrobbleData.duration/1000 + 's';
+  if (nowPlayingTrackInfo && nowPlayingTrackInfo.wiki && nowPlayingTrackInfo.wiki.summary) rootTree.navigation.info.artist += ('.  ' + nowPlayingTrackInfo.wiki.summary);
+  if (nowPlayingTrackInfo && nowPlayingTrackInfo.userplaycount) rootTree.navigation.info.year = ('User played: ' + nowPlayingTrackInfo.userplaycount);
   
   for (var f in self.fTree) {
     
@@ -952,7 +958,8 @@ ControllerLastFM.prototype.initLastFMSession = function (passwd) {
 //        });
         self.lfm = new LastfmAPI({
             'api_key' : self.config.get('API_KEY'),
-            'secret' : self.config.get('API_SECRET')
+            'secret' : self.config.get('API_SECRET'),
+            'useragent' : 'Volumio LastFM plugin/v1.6.0'
         });
 
         if(self.config.get('sessionKey') != ''){
@@ -1117,6 +1124,7 @@ ControllerLastFM.prototype.updateNowPlaying = function ()
             autocorrect: 1})
                 .then(trackInfo => {
                     self.logger.info('[LastFM] track info: ' + JSON.stringify(trackInfo));
+                    nowPlayingTrackInfo = trackInfo;
                     let updated = false;
                     if ((trackInfo.duration != undefined) && (trackInfo.duration > 0))
 					{
