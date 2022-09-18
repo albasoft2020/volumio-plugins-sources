@@ -109,7 +109,7 @@ LastfmAPI.prototype.getArtistInfo = function (artist) {
 LastfmAPI.prototype.getSimilarArtists = function (artist) {
 	var defer = libQ.defer();
     var options = defaults.promiseOptions(artist, defer, 'similarartists');
-	this.lastfm.api.request('artist.getSimilar', options);
+	this.api.request('artist.getSimilar', options);
     return defer.promise;
 };
 
