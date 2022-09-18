@@ -17,10 +17,17 @@ const retryOnErrors = [
     ];
 var scrobbleCache;
 
+const status = {
+    timestamp : 0,
+    cached : 0,
+    accepted : 0,
+    ignored : 0
+};
 
 var LastfmAPI = module.exports = function (options) {
 	this.api = new LastFmNode(options);
 	this.sessionCredentials = null;
+    status.timestamp = Math.floor(Date.now() / 1000);
 };
 
 
@@ -43,6 +50,9 @@ LastfmAPI.prototype.getMobileSession = function (username, password) {
     return defer.promise;
 };
 
+LastfmAPI.prototype.getStatus = function () {
+    return status;
+};
 
 LastfmAPI.prototype.updateNowPlaying = function (track) {
 	var defer = libQ.defer();
@@ -126,7 +136,10 @@ LastfmAPI.prototype.scrobbleToCache = function (track) {
                 scrobbleCache.put(track.timestamp, track, function(err) {
                     //check err for errors
                     if (err) reject('Failed to add track to cache');
-                    else resolve(track);
+                    else {
+                        status.cached++;
+                        resolve(track);
+                    }
                 });
             } 
             else reject('Not enough data in track to be a valid scrobble.');
@@ -177,7 +190,10 @@ LastfmAPI.prototype.scrobbleCachedData = function () {
                 self.scrobble(submittedTracks)
                         .then(resp => {
                             info.accepted = resp['@attr'].accepted;
-
+                            status.accepted += info.accepted;
+                            status.ignored += resp['@attr'].ignored;
+                            status.cached = info.remaining;
+                            
                             if (cnt === 1){
                                 scrobbleCache.deleteSync(submittedKeys);
                                 if (info.accepted > 0){
@@ -215,7 +231,8 @@ LastfmAPI.prototype.scrobbleCachedData = function () {
                              if (!err.error || retryOnErrors.includes(err.error)) reject('Failed to scrobble; keep in cache');
                              else  {
                                 submittedKeys.forEach(key => { scrobbleCache.deleteSync(key); });
-                                reject('Failed to scrobble. Will remove track from cache');
+                                status.cached = info.remaining;
+                                reject('Failed to scrobble. Will remove ' + cnt + ' tracks from cache');
                             } 
                         });  
             } else resolve(info);

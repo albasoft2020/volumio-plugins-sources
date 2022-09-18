@@ -6,7 +6,7 @@ var http = require('http');
 var io = require('socket.io-client');
 var pTimer = require('./pausableTimer');
 var socket = io.connect('http://localhost:3000');
-var lastfm = require("simple-lastfm");
+//var lastfm = require("simple-lastfm");
 var LastfmAPI = require('./lib/lastfmPromises');
 var libQ = require('kew');
 
@@ -28,6 +28,8 @@ var StationNames = ["Jazz FM", "Jazz FM Premium"];
 var trackStartTime = 0;
 
 let nowPlayingTrackInfo = {};
+
+const cacheSettings = {base:'/var/tmp', name:'scrobbles'};
 
 // Define the ControllerLastFM class
 module.exports = ControllerLastFM;
@@ -103,7 +105,15 @@ ControllerLastFM.prototype.onStart = function() {
     self.currentTimer = new pTimer(self.context, debugEnabled);
 
     self.initScrobbleSettings();
-    self.initLastFMSession().then(result => self.logger.info('[LastFM] finished init: ' + result), error => self.logger.info('[LastFM] finished init with error: ' + error) );
+    self.initLastFMSession()
+        .then(result => {
+            self.logger.info('[LastFM] finished init: ' + result);
+            self.lfm.initCache(cacheSettings);
+            self.lfm.scrobbleCachedData()
+                .then(self.logger.info(JSON.stringify(self.lfm.getStatus())))
+                .catch(error => self.logger.error('[LastFM] finished init with error: ' + error));
+        })
+        .fail( error => self.logger.error('[LastFM] finished init with error: ' + error) );
 
     // start monitoring the Volumio state to check what song is playing and scrobble it:
     socket.on('pushState', function (state) { self.checkStateUpdate(state); });
@@ -248,7 +258,7 @@ ControllerLastFM.prototype.handleBrowseUri = function (curUri) {
     }
     return response
         .fail(function (e) {
-            self.logger.info('[' + Date.now() + '] ' + '[LastFM] handleBrowseUri failed');
+            self.logger.info('[LastFM] handleBrowseUri failed');
             libQ.reject(new Error());
         });
 };
@@ -262,6 +272,8 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
 //		{ label: 'Settings', uri: 'settings', icon: 'fa fa-gears'}
 	];
   var defer = libQ.defer();
+    var artworkTrack = self.getAlbumArt(self.scrobbleData, undefined, 'users');
+
 
 //  let duration = '';
 //  if (self.scrobbleData.duration) duration = self.scrobbleData.duration/1000 + 's';
@@ -289,12 +301,12 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
     //        year: '',
     //        genre: '',
             service: 'lastfm', 
-            type: 'album'//, 
-            //albumart: artworkSearchedArtist 
+            type: 'album', 
+            albumart: artworkTrack 
         } 
     }
   };
-  if (self.scrobbleData.duration) rootTree.navigation.info.duration = self.scrobbleData.duration/1000 + 's';
+  //if (self.scrobbleData.duration) rootTree.navigation.info.duration = self.scrobbleData.duration/1000 + 's';
   if (nowPlayingTrackInfo && nowPlayingTrackInfo.wiki && nowPlayingTrackInfo.wiki.summary) rootTree.navigation.info.artist += ('.  ' + nowPlayingTrackInfo.wiki.summary);
   if (nowPlayingTrackInfo && nowPlayingTrackInfo.userplaycount) rootTree.navigation.info.year = ('User played: ' + nowPlayingTrackInfo.userplaycount);
   
@@ -961,10 +973,12 @@ ControllerLastFM.prototype.initLastFMSession = function (passwd) {
             'secret' : self.config.get('API_SECRET'),
             'useragent' : 'Volumio LastFM plugin/v1.6.0'
         });
-
-        if(self.config.get('sessionKey') != ''){
+        
+        let sk = self.config.get('sessionKey');
+        if(sk != ''){
+            self.lfm.setSessionCredentials(self.config.get('username'), sk);
             if (debugEnabled) self.logger.info('[LastFM] Used sessionkey');
-            self.lfm.setSessionCredentials(self.config.get('username'), self.config.get('sessionKey'));
+            defer.resolve(sk);
         }
         else {
             self.lfm.getMobileSession(self.config.get('username'), passwd)
@@ -1168,6 +1182,9 @@ ControllerLastFM.prototype.updateNowPlaying = function ()
 //            }
 //        });
 
+// lfm.scrobbleCachedData().then(resp => {console.log('Scrobbled: ',resp); console.log(lfm.getStatus());}).catch(err => console.log('Error: ', err));
+        self.lfm.scrobbleCachedData().then(resp => {console.log('Scrobbled: ',resp); console.log(self.lfm.getStatus());}).catch(err => console.log('Error: ', err));
+
         // Used to notify Last.fm that a user has started listening to a track. Parameter names are case sensitive.
         self.lfm.updateNowPlaying({
             artist: self.scrobbleData.artist,
@@ -1234,8 +1251,10 @@ ControllerLastFM.prototype.scrobble = function ()
 //			}
 //		});	
 //		
-// lfm.scrobble(track).then(resp => console.log(resp.scrobble.artist['#text']+ ' - ' + (resp.scrobble.album['#text'] || 'unknown' )));
-		self.lfm.scrobble({
+
+//lfm.scrobbleToCache(track).then(resp => {console.log('Added track to cache: ',resp); console.log(lfm.getStatus());}).catch(err => console.log('Error: ', err));
+
+        self.lfm.scrobbleToCache({
 			artist: self.scrobbleData.artist,
 			track: self.scrobbleData.title,
 			album: self.scrobbleData.album,
@@ -1246,10 +1265,9 @@ ControllerLastFM.prototype.scrobble = function ()
                     if (self.config.get('pushToastOnScrobble'))
                         self.commandRouter.pushToastMessage('success', 'Scrobble succesful', 'Scrobbled: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
                     if (debugEnabled)
-                        self.logger.info('[LastFM] Scrobble successful for: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
+                        self.logger.info('[LastFM] Scrobbled to cache: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
                 })
-                .fail(err => {
-                   console.log("in callback, finished: ", err);
+                .catch(err => {
                     if (self.config.get('pushToastOnScrobble'))
                         self.commandRouter.pushToastMessage('error', 'Scrobble failed', 'Tried to scrobbled: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
                     if (debugEnabled)
