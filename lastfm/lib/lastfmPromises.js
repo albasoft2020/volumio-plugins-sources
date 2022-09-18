@@ -104,6 +104,12 @@ LastfmAPI.prototype.getSimilarArtists = function (artist) {
 };
 
 // Routines for using a persistent cache----------------------------------------------------------------------------------
+// 
+// When starting these functions I noiced that kew is by now actually deprecated
+// So tried using node internal Promise instead...
+// Not the most consistent; seeing that most of Volumio is still using kew I should just stick with it here as well?
+// ------------------------------------------------------------------------------------------------------------------------
+
 // e.g. options {base:'.', name:'scrobbles'}
 LastfmAPI.prototype.initCache = function (options) {
     options = options || { name:'scrobbles' };
@@ -112,55 +118,107 @@ LastfmAPI.prototype.initCache = function (options) {
 
 LastfmAPI.prototype.scrobbleToCache = function (track) {
     return new Promise((resolve, reject) => {
-        if (track && track.artist && track.track) { // enough data for scrobbling
-            track.timestamp = track.timestamp || Math.floor(Date.now() / 1000);  // if timestamp is missing use 'now'
-            // add to cache using timestamp as the key
-            scrobbleCache.put(track.timestamp, track, function(err) {
-                //check err for errors
-                if (err) reject('Failed to add track to cache');
-                else resolve('Added track to cache');
-            });
-        } 
-        else reject('Not enough data in track to be a valid scrobble.');
+        if (!scrobbleCache) reject("Scrobble cache not configured yet!");  
+        else {
+            if (track && track.artist && track.track) { // enough data for scrobbling
+                track.timestamp = track.timestamp || Math.floor(Date.now() / 1000);  // if timestamp is missing use 'now'
+                // add to cache using timestamp as the key
+                scrobbleCache.put(track.timestamp, track, function(err) {
+                    //check err for errors
+                    if (err) reject('Failed to add track to cache');
+                    else resolve(track);
+                });
+            } 
+            else reject('Not enough data in track to be a valid scrobble.');
+        }
     });
 };
 
-LastfmAPI.prototype.scrobbleCachedData = function (options) {
+LastfmAPI.prototype.scrobbleCachedData = function () {
     let self = this;
-    if (!scrobbleCache) self.initCache(options);  // Make sure cache is set up!
+    if (!scrobbleCache) return Promise.reject("Scrobble cache not configured yet!");  
+    
+    const info = {
+        submitted : 0,
+        accepted : 0,
+        remaining : 0,
+        track : {}
+    };
+    
     return new Promise((resolve, reject) => {
         scrobbleCache.keys(function(err, keys) {
             //Handle errors
             if (err) return reject(err);
             
             console.log("Scrobble cache keys: ", keys); 
-            if (keys.length > 0) {
-                keys.forEach(key => {
-                    console.log(JSON.stringify(scrobbleCache.getSync(key)));
-                    self.scrobble(scrobbleCache.getSync(key))
+            let cacheSize = keys.length;
+            if (cacheSize > 0) {
+                let cnt = 0;
+                let submittedTracks = [], submittedKeys = [];
+                if (cacheSize === 1) {  // just one track: don't submit track as an array
+                    submittedKeys = keys[0];
+                    submittedTracks = scrobbleCache.getSync(submittedKeys);
+                    cnt = 1;
+                }
+                else {
+                    keys.forEach(key => {
+                        if (cnt < 49) {  // 50 is the LastFM hard limit for tracks in an array
+                            submittedKeys.push(key);
+                            submittedTracks.push(scrobbleCache.getSync(key));
+                            cnt++;
+                        }
+                        // TO-DO: properly deal with caches with more than 50 entries. At the moment just leave 
+                        // 'excess' tracks in cache and deal with them next time routine is called...
+                    });
+                    console.log(cnt + ' out of ' + cacheSize);
+                    if (cnt < cacheSize) info.remaining = cacheSize - cnt;
+                }
+                info.submitted = cnt;
+                self.scrobble(submittedTracks)
                         .then(resp => {
-                            scrobbleCache.deleteSync(key);
-            //                console.log('Appected: ' + resp['@attr']['accepted']);
-                            if (resp['@attr'].accepted > 0){
-//                                console.log(resp.scrobble.artist['#text']+ ' - ' + (resp.scrobble.track['#text'] || 'unknown'));// + ' (' +(resp.scrobble.album['#text'] || 'unknown' ));
-                                resolve(resp.scrobble.artist['#text']+ ' - ' + (resp.scrobble.track['#text'] || 'unknown'));
-                            }
-                            else {
-//                                console.log('Failed ');
-                                reject('Failed');
+                            info.accepted = resp['@attr'].accepted;
+
+                            if (cnt === 1){
+                                scrobbleCache.deleteSync(submittedKeys);
+                                if (info.accepted > 0){
+                                    info.track.artist = resp.scrobble.artist['#text'];
+                                    info.track.track = resp.scrobble.track['#text'];
+                                    info.track.timestamp = resp.scrobble.timestamp;
+                                    if (resp.scrobble.album['#text']) info.track.album = resp.scrobble.album['#text'];
+                                    
+                                    resolve(info);
+                                }
+                                else {
+                                    reject('Server ignored scrobble request');
+                                }                                
+                            } else {
+                                submittedKeys.forEach(key => { scrobbleCache.deleteSync(key); });
+                                if (info.accepted > 0){
+                                    let i = cnt - 1;
+                                    // find last accepted entry
+                                    while((i > 0) && (resp.scrobble[i].ignoredMessage.code > 0)){i--};
+                                    console.log(i, resp.scrobble[i].ignoredMessage.code);
+                                    info.track.artist = resp.scrobble[i].artist['#text'];
+                                    info.track.track = resp.scrobble[i].track['#text'];
+                                    info.track.timestamp = resp.scrobble[i].timestamp;
+                                    if (resp.scrobble[i].album['#text']) info.track.album = resp.scrobble[i].album['#text'];
+
+                                    resolve(info);
+                                }
+                                else {
+                                    reject('Server ignored all ' + cnt + ' scrobble requests');
+                                }                                
                             }
                         })
                         .fail(err => {
                             // If it is a lastFM error then err.error should be defined and a number code. If not there has been some other error, such as network connection down.
-                             if (!err.error || retryOnErrors.includes(err.error)) console.log('Failed to scrobble; keep in cache');
+                             if (!err.error || retryOnErrors.includes(err.error)) reject('Failed to scrobble; keep in cache');
                              else  {
-//                                console.log('Failed to scrobble. Will remove track from cache');
+                                submittedKeys.forEach(key => { scrobbleCache.deleteSync(key); });
                                 reject('Failed to scrobble. Will remove track from cache');
-                                scrobbleCache.deleteSync(key);
                             } 
                         });  
-                });
-            } else resolve('Cache was empty. No tracks scrobbled.')
+            } else resolve(info);
         });
     });
 };    
