@@ -6,7 +6,8 @@ var http = require('http');
 var io = require('socket.io-client');
 var pTimer = require('./pausableTimer');
 var socket = io.connect('http://localhost:3000');
-//var lastfm = require("simple-lastfm");
+// New Last.FM library which has better error handling and is more comprehensive
+// Note that it is currently linked to a forked version
 var LastfmAPI = require('./lib/lastfmPromises');
 var libQ = require('kew');
 
@@ -34,8 +35,7 @@ const cacheSettings = {base:'/var/tmp', name:'scrobbles'};
 // Define the ControllerLastFM class
 module.exports = ControllerLastFM;
 
-function ControllerLastFM(context) 
-{
+function ControllerLastFM(context) {
 	var self = this;
     self.previousState = { title: '| Initialising...' };
 	self.updatingNowPlaying = false;
@@ -107,10 +107,10 @@ ControllerLastFM.prototype.onStart = function() {
     self.initScrobbleSettings();
     self.initLastFMSession()
         .then(result => {
-            self.logger.info('[LastFM] finished init: ' + result);
+            self.logger.info('[LastFM] finished init');
             self.lfm.initCache(cacheSettings);
             self.lfm.scrobbleCachedData()
-                .then(self.logger.info(JSON.stringify(self.lfm.getStatus())))
+                .then(self.logger.info('[LastFM] Status: ' + JSON.stringify(self.lfm.getStatus())))
                 .catch(error => self.logger.error('[LastFM] finished init with error: ' + error));
         })
         .fail( error => self.logger.error('[LastFM] finished init with error: ' + error) );
@@ -225,10 +225,14 @@ ControllerLastFM.prototype.setConf = function(conf) {
 	return libQ.resolve();
 };
 
-//-------------------------------------------------------------------------
+/*-------------------------------------------------------------------------
 // 'Music service' related functions
-//
-// required to add to add lastFM to browser
+*/
+
+/** Add lastFM to browser
+ * Required by Volumio
+ * @returns {undefined}
+ */
 ControllerLastFM.prototype.addToBrowseSources = function () {
     var data = { 
 		name: 'LastFM', 
@@ -241,7 +245,11 @@ ControllerLastFM.prototype.addToBrowseSources = function () {
     this.commandRouter.volumioAddToBrowseSources(data);
 };
 
-// required to handle lastFM browser events
+/** Handle lastFM browser events. 
+ * Required by Volumio
+ * @param {type} curUri
+ * @returns {unresolved}
+ */
 ControllerLastFM.prototype.handleBrowseUri = function (curUri) {
     var self = this;
     var response;
@@ -287,6 +295,12 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
           ],
           items: [
           ]
+        },
+        {
+          availableListViews: ['list'],
+          title : 'Scrobbler status',
+          items: [
+          ]
         }
       ],
       prev: {
@@ -295,8 +309,8 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
         info: { 
             uri: "search/artist/" + self.scrobbleData.artist, 
 //            title: 'Now playing "' + self.scrobbleData.title + '"', 
-            album: 'Now playing "' + self.scrobbleData.title + '"',
-            artist: self.scrobbleData.artist,
+            album: '"' + self.scrobbleData.title + '" by "' + self.scrobbleData.artist + '"',
+    //        artist: self.scrobbleData.artist,
     //        duration: duration,
     //        year: '',
     //        genre: '',
@@ -307,11 +321,10 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
     }
   };
   //if (self.scrobbleData.duration) rootTree.navigation.info.duration = self.scrobbleData.duration/1000 + 's';
-  if (nowPlayingTrackInfo && nowPlayingTrackInfo.wiki && nowPlayingTrackInfo.wiki.summary) rootTree.navigation.info.artist += ('.  ' + nowPlayingTrackInfo.wiki.summary);
+  if (nowPlayingTrackInfo && nowPlayingTrackInfo.wiki && nowPlayingTrackInfo.wiki.summary) rootTree.navigation.info.artist = (nowPlayingTrackInfo.wiki.summary);
   if (nowPlayingTrackInfo && nowPlayingTrackInfo.userplaycount) rootTree.navigation.info.year = ('User played: ' + nowPlayingTrackInfo.userplaycount);
   
-  for (var f in self.fTree) {
-    
+  for (var f in self.fTree) {    
     rootTree.navigation.lists[0].items.push({
       service: 'lastfm',
       type: 'category',
@@ -323,6 +336,35 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
       uri: 'lastfm/' + self.fTree[f].uri
     });
   }
+    let lfmstat = self.lfm.getStatus();
+    rootTree.navigation.lists[1].items.push({
+        service: 'lastfm',
+        type: 'item-no-menu',
+        title: 'Start time',
+        icon: 'fa fa-clock',
+        album: new Date(lfmstat.timestamp*1000).toLocaleString()
+    });
+    rootTree.navigation.lists[1].items.push({
+        service: 'lastfm',
+        type: 'item-no-menu',
+        title: 'Successful scrobbles',
+        icon: 'fa fa-check',
+        album: String(lfmstat.accepted).padStart(4)
+    });
+    rootTree.navigation.lists[1].items.push({
+        service: 'lastfm',
+        type: 'item-no-menu',
+        title: 'Cached scrobbles',
+        icon: 'fa fa-check',
+        album: String(lfmstat.cached).padStart(4)
+    });
+    rootTree.navigation.lists[1].items.push({
+        service: 'lastfm',
+        type: 'item-no-menu',
+        title: 'Ignored scrobbles',
+        icon: 'fa fa-xmark',
+        album: String(lfmstat.ignored).padStart(4)
+    });
   defer.resolve(rootTree);
     
   return defer.promise;
@@ -339,102 +381,81 @@ ControllerLastFM.prototype.getAlbumArt = function (data, path, icon) {
   }
 };
 
-// Handle browse events----------------------------------------------------------------------------------
-// 
-// Handle getting similar artist
+/* ----------------------------------------------------------------------------------
+ * Handle browse events
+*/
+
+/** Handle getting similar artist.
+ * @param {type} uri
+ * @returns {.libQ@call;defer.promise}
+ */
 ControllerLastFM.prototype.getSimilarArtists = function(uri) {
 	var self = this;
 	var defer = libQ.defer();
 
     var artworkSearchedArtist = self.getAlbumArt({artist: self.scrobbleData.artist}, undefined, 'users');
 
-    var rootTree = 
-    {
-        navigation: {
-            lists: [
-            {
-                availableListViews: [
-                    'grid', 'list'
-                ],
-                items: []
-            }],
-            prev: {
-                uri: 'lastfm'
-            },                 
-            info: { 
-                uri: "search/artist/" + self.scrobbleData.artist, 
-//                title: 'Similar artists to ' + self.scrobbleData.artist, 
-                album: 'Similar artists to ' + self.scrobbleData.artist,
-                artist: "Info about artist?",
-                duration: 'duration',
-                year: 'Year or user play count?',
-                genre: 'Genre or userloved?',
-                service: 'lastfm', 
-                type: 'album', 
-                albumart: artworkSearchedArtist 
-            } 
-        }
-    };
-
-    // This is on the git repository, but does not seem to be in the latest version that I can fetch by "npm update" right now
-// 
-//    self.lfm.getSimilarArtists({
-//        artist: self.scrobbleData.artist,
-//        limit: 10,
-//        callback: function (result) {
-//            if (result.success) {
-//                // Display results to start with
-//                self.logger.info('[LastFM] track info: ' + JSON.stringify(result));
-//            }
-//            else
-//                self.logger.error('[LastFM] track info request failed with error: ' + result.error);
-//        }
-//    });
-
-	var call = self.apiCall('artist.getsimilar', self.scrobbleData);
-	call.then(function(response){
-		
-		var jsonResp = JSON.parse(response);
-        for (var art in jsonResp.similarartists.artist)
-        {            
-            rootTree.navigation.lists[0].items.push({
-                service: 'lastfm',
-                type: 'item-no-menu',
-                title: jsonResp.similarartists.artist[art].name,
-                artist: '',
-                mbid: jsonResp.similarartists.artist[art].mbid,
-                albumart: self.getAlbumArt({artist: jsonResp.similarartists.artist[art].name}, undefined, 'users'),
-                uri: "search/artist/" + jsonResp.similarartists.artist[art].name,
-            });            
-        }		
-        //self.logger.info('[LastFM] items: ' + JSON.stringify(rootTree.navigation.lists[0].items));
-        defer.resolve(rootTree);
-    })
-	.fail(function()
-	{
-		defer.reject(new Error('An error occurred while listing similar artists'));
-	});	
-	return defer.promise;
+    self.lfm.getSimilarArtists({artist: self.scrobbleData.artist, limit: 20})
+        .then( resp => {
+            let rootTree =  {
+                navigation: {
+                    lists: [
+                    {
+                        availableListViews: [
+                            'grid', 'list'
+                        ],
+                        items: []
+                    }],
+                    prev: {
+                        uri: 'lastfm'
+                    },                 
+                    info: { 
+                        uri: "search/artist/" + self.scrobbleData.artist, 
+        //                title: 'Similar artists to ' + self.scrobbleData.artist, 
+                        album: 'Similar artists to ' + self.scrobbleData.artist,
+                        artist: "Info about artist?",
+                        duration: 'duration',
+                        year: 'Year or user play count?',
+                        genre: 'Genre or userloved?',
+                        service: 'lastfm', 
+                        type: 'album', 
+                        albumart: artworkSearchedArtist 
+                    } 
+                }
+            };
+            for (var art in resp.artist)
+            {            
+                rootTree.navigation.lists[0].items.push({
+                    service: 'lastfm',
+                    type: 'item-no-menu',
+                    title: resp.artist[art].name,
+                    artist: '',
+                    mbid: resp.artist[art].mbid,
+                    albumart: self.getAlbumArt({artist: resp.artist[art].name}, undefined, 'users'),
+                    uri: "search/artist/" + resp.artist[art].name
+                });            
+            }		
+            //self.logger.info('[LastFM] items: ' + JSON.stringify(rootTree.navigation.lists[0].items));
+            defer.resolve(rootTree);                
+        })
+        .fail(function() {
+            defer.reject(new Error('An error occurred while listing similar artists'));
+        });	
+    return defer.promise;
 };
 
 // Handle getting similar track info
 ControllerLastFM.prototype.getSimilarTracks = function(uri) {
 	var self = this;
 	var defer = libQ.defer();
-  
-	if(self.lfm != null)
-	{
-		var call = self.apiCall('track.getsimilar', self.scrobbleData);
-		call.then(function(response){
-			
-			var jsonResp = JSON.parse(response);
-
-			//self.logger.info('[LastFM] items: ' + response);
-
+    self.logger.info('[LastFM] Requesting similar tracks.' + JSON.stringify(self.scrobbleData));	
+	if(self.lfm != null) {
+		self.lfm.getSimilarTracks({artist: self.scrobbleData.artist, track: self.scrobbleData.title})
+        .then(function(response){
+			self.logger.info('[LastFM] received response for similar tracks.');			
 			var artworkSearchedTrack = self.getAlbumArt(self.scrobbleData, undefined, 'fa fa-music');
 
-			var rootTree = 
-			{
+			var rootTree = {
 				navigation: {
 					lists: [
 					{
@@ -456,40 +477,99 @@ ControllerLastFM.prototype.getSimilarTracks = function(uri) {
 				}
 			};
 			
-			if(jsonResp.similartracks.track.length < 1)
+			if(response.track.length < 1)
 				self.commandRouter.pushToastMessage('info', "No results", "The query yielded no results, no similar track could be found for " + self.scrobbleData.artist + ' - ' + self.scrobbleData.title);
 			
 			var artwork = '';
 			
-			for (var trk in jsonResp.similartracks.track)
-			{	
+			for (var trk in response.track) {	
 				//  Hmm, similarTracks does NOT return an album field; so this does not work so well:
-				artwork = self.getAlbumArt({artist: jsonResp.similartracks.track[trk].artist.name, album: jsonResp.similartracks.track[trk].album}, undefined, 'fa fa-music');
+				artwork = self.getAlbumArt({artist: response.track[trk].artist.name, album: response.track[trk].album}, undefined, 'fa fa-music');
 				rootTree.navigation.lists[0].items.push({
 					service: 'lastfm',
 					type: 'track',
-					title: jsonResp.similartracks.track[trk].name,
-					artist: jsonResp.similartracks.track[trk].artist.name,
-					mbid: jsonResp.similartracks.track[trk].artist.mbid,
+					title: response.track[trk].name,
+					artist: response.track[trk].artist.name,
+					mbid: response.track[trk].artist.mbid,
 					albumart: artwork,
-					uri: "search/any/" + jsonResp.similartracks.track[trk].name
+					uri: "search/any/" + response.track[trk].name
 				});
 			}
 			
 			self.logger.info('[LastFM] items: ' + JSON.stringify(rootTree.navigation.lists[0].items));
 			defer.resolve(rootTree);
 		})
-		.fail(function()
+		.fail(function(err)
 		{
-			defer.reject(new Error('An error occurred while listing playlists'));
+            self.logger.info('[LastFM] failed to received response for similar tracks.' + err);	
+            defer.reject(new Error('An error occurred while listing playlists'));
 		});
+        
+//        var call = self.apiCall('track.getsimilar', self.scrobbleData);
+//		call.then(function(response){
+//			
+//			var jsonResp = JSON.parse(response);
+//
+//			//self.logger.info('[LastFM] items: ' + response);
+//
+//			var artworkSearchedTrack = self.getAlbumArt(self.scrobbleData, undefined, 'fa fa-music');
+//
+//			var rootTree = 
+//			{
+//				navigation: {
+//					lists: [
+//					{
+//						availableListViews: [
+//							'grid', 'list'
+//						],
+//						items: []
+//					}],
+//					prev: {
+//						uri: 'lastfm'
+//					},
+//					info: { 
+//						uri: "search/any/" + self.scrobbleData.title, 
+//						title: 'Similar tracks to ' + self.scrobbleData.title + ' by ' + self.scrobbleData.artist, 
+//						service: 'lastfm', 
+//						type: 'album', 
+//						albumart: artworkSearchedTrack 
+//					} 
+//				}
+//			};
+//			
+//			if(jsonResp.similartracks.track.length < 1)
+//				self.commandRouter.pushToastMessage('info', "No results", "The query yielded no results, no similar track could be found for " + self.scrobbleData.artist + ' - ' + self.scrobbleData.title);
+//			
+//			var artwork = '';
+//			
+//			for (var trk in jsonResp.similartracks.track)
+//			{	
+//				//  Hmm, similarTracks does NOT return an album field; so this does not work so well:
+//				artwork = self.getAlbumArt({artist: jsonResp.similartracks.track[trk].artist.name, album: jsonResp.similartracks.track[trk].album}, undefined, 'fa fa-music');
+//				rootTree.navigation.lists[0].items.push({
+//					service: 'lastfm',
+//					type: 'track',
+//					title: jsonResp.similartracks.track[trk].name,
+//					artist: jsonResp.similartracks.track[trk].artist.name,
+//					mbid: jsonResp.similartracks.track[trk].artist.mbid,
+//					albumart: artwork,
+//					uri: "search/any/" + jsonResp.similartracks.track[trk].name
+//				});
+//			}
+//			
+//			self.logger.info('[LastFM] items: ' + JSON.stringify(rootTree.navigation.lists[0].items));
+//			defer.resolve(rootTree);
+//		})
+//		.fail(function()
+//		{
+//			defer.reject(new Error('An error occurred while listing playlists'));
+//		});
 	}
 	else
 	{
 		defer.reject(new Error('No LastFM session key available to use'));
 		self.logger.error("[LastFM] plugin is not authenticated, please retry");
-	}
-	
+	}	
 	return defer.promise;
 };
 
@@ -582,6 +662,12 @@ ControllerLastFM.prototype.checkURL = function(url)
 	return defer.promise;
 };
 
+/** Start pausable timer used to initiate scrobbling 
+ * 
+ * @param {type} timerLength
+ * @param {type} state
+ * @returns {.libQ@call;defer.promise}
+ */
 ControllerLastFM.prototype.startScrobbleTimer = function(timerLength, state)
 {
 	var self = this;
@@ -613,9 +699,12 @@ ControllerLastFM.prototype.startScrobbleTimer = function(timerLength, state)
 };
 
 
-
-ControllerLastFM.prototype.updateCredentials = function (data)
-{
+/** Update the credentials used to connect to LastFM server
+ * 
+ * @param {type} data
+ * @returns {.libQ@call;defer.promise}
+ */
+ControllerLastFM.prototype.updateCredentials = function (data) {
 	var self = this;
 	var defer = libQ.defer();
 
@@ -639,8 +728,7 @@ ControllerLastFM.prototype.updateCredentials = function (data)
 	return defer.promise;
 };
 
-ControllerLastFM.prototype.updateScrobbleSettings = function (data)
-{
+ControllerLastFM.prototype.updateScrobbleSettings = function (data) {
 	var self = this;
 	var defer=libQ.defer();
 
@@ -675,8 +763,7 @@ ControllerLastFM.prototype.updateDebugSettings = function (data)
 	return defer.promise;
 };
 
-ControllerLastFM.prototype.updateCompositeTitleSettings = function (titleSeparator, artistFirst)
-{
+ControllerLastFM.prototype.updateCompositeTitleSettings = function (titleSeparator, artistFirst) {
 	var self = this;
 
     if (artistFirst) {
@@ -705,8 +792,7 @@ ControllerLastFM.prototype.updateServicesSettings = function (data)
     scrobbleThresholdSong = data['scrobbleThreshold'].value*10;  // Multiplier for song duration that also performs conversion from s to ms
     scrobbleThresholdStream = data['streamScrobbleThreshold'] * 1000;  // Convert from s to ms
     
-    if (debugEnabled)
-	{
+    if (debugEnabled) {
         self.logger.info('[LastFM] blacklisted services: ' + JSON.stringify(blacklistedServices));
         self.logger.info('[LastFM] Threshold values. Song: ' + scrobbleThresholdSong + ', stream: ' + scrobbleThresholdStream);
 	}
@@ -730,6 +816,11 @@ ControllerLastFM.prototype.initScrobbleSettings = function ()
 
 // Scrobble Methods -------------------------------------------------------------------------------------
 
+/** Check changes in state announced by Volumio to decide whether a new track has started, etc
+ * 
+ * @param {type} state
+ * @returns {.libQ@call;defer.promise}
+ */
 ControllerLastFM.prototype.checkStateUpdate = function (state) {
     var self = this;
     var defer = libQ.defer(); 
@@ -890,8 +981,7 @@ ControllerLastFM.prototype.checkStateUpdate = function (state) {
     return defer.promise;
 };
 
-ControllerLastFM.prototype.formatScrobbleData = function (state)
-{
+ControllerLastFM.prototype.formatScrobbleData = function (state) {
 	var self = this;
     var defer = libQ.defer();
     var success = true;
@@ -946,6 +1036,7 @@ ControllerLastFM.prototype.formatScrobbleData = function (state)
 	return success;
 };
 
+/** Initialise Last.FM session */
 ControllerLastFM.prototype.initLastFMSession = function (passwd) {
     var self = this;
 	var defer = libQ.defer();
@@ -1033,59 +1124,10 @@ ControllerLastFM.prototype.initLastFMSession = function (passwd) {
     return defer.promise;
 };
 
-ControllerLastFM.prototype.processScrobbleCache = function(data) {
-	var self = this;
-
-	self.logger.info("[LastFM] Checking scrobble cache");
-    var path = '/tmp/lastFMcache.json';
-    try {
-        if (fs.existsSync(path)) {
-            //file exists
-            var scrobbleCache = fs.readJsonSync(path, { throws: false });
-            if (Array.isArray(scrobbleCache)) {
-                // is an array
-                self.scrobblableTrack = true;
-                if(debugEnabled)
-                    self.logger.info('[LastFM] preparing to scrobble ' + scrobbleCache.length + ' tracks from cache...');
-                for(var track of scrobbleCache){
-                    //self.logger.info('[LastFM] Cache entry: ' + JSON.stringify(track));
-                    if (!track['album']) track['album'] = '';
-                    self.scrobbleData =
-                        {
-                            artist: track['artist'],
-                            title: track['title'],
-                            album: track['album'],
-                            duration: track['duration']
-                        };
-                    trackStartTime = track['timestamp'];
-//                    self.logger.info('[LastFM] scrobble data: ' + JSON.stringify(self.scrobbleData)+ ', timestamp: ' + trackStartTime);
-                    self.scrobble();
-                }
-                // delete cache (should really check whether the scrobbling actually worked...)
-                fs.unlink(path, function (err) {
-                    if (err) {
-                        self.logger.error('[LastFM] Failed to delete the cache file...');
-                    } else {
-                        // if no error, file has been deleted successfully
-                        self.logger.info('[LastFM] Deleted the cache file...');
-                    }
-                });
-            }
-            else {
-                if(debugEnabled)
-                    self.logger.info('[LastFM] Scrobble cache empty...');                 
-             }
-        }
-    } catch(err) {
-        // console.error(err)
-        if(debugEnabled)
-            self.logger.info('[LastFM] No scrobble cache file...');                 
-    }
-
-	
-	return libQ.resolve();
-};
-
+/* Called when a new track has started
+ * Gets Track info from Last.FM and potentially fix metadata such as duration
+ * It then triggers scrobbling of cached data and updates the nowplaying info on Last.FM
+ */
 ControllerLastFM.prototype.updateNowPlaying = function ()
 {
 	var self = this;
@@ -1097,41 +1139,6 @@ ControllerLastFM.prototype.updateNowPlaying = function ()
         self.updatingNowPlaying = true;
 
         // Try to fetch track info
-//        self.lfm.getTrackInfo({
-//            artist: self.scrobbleData.artist,
-//            track: self.scrobbleData.title,
-//            autocorrect: 1,
-//            callback: function (result)
-//			{
-//                if (result.success)
-//				{
-//                    // Display results to start with
-//                    self.logger.info('[LastFM] track info: ' + JSON.stringify(result));
-//                    let updated = false;
-//                    if (result.trackInfo.duration != undefined)
-//					{
-//                        if (self.scrobbleData.duration == 0)
-//						{
-//                            self.scrobbleData.duration = result.trackInfo.duration;
-//                            self.logger.info('[LastFM] Updated missing track duration: ' + result.trackInfo.duration);
-//                            updated = true;
-//                        }
-//                    }
-//                    if (!self.scrobbleData.album && (result.trackInfo.album != undefined) && (result.trackInfo.album.title != undefined))
-//					{
-//                        self.scrobbleData.album = result.trackInfo.album.title;
-//                        self.logger.info('[LastFM] Updated missing track album: ' + self.scrobbleData.album);
-//                        updated = true;
-//                    }
-//                    defer.resolve(updated);
-//                }
-//                else 
-//                {
-//                    self.logger.error('[LastFM] track info request failed with error: ' + result.error);
-//                    defer.resolve(false);  // also use resolve here, as reaction to promise should be the same right now
-//                }
-//            }
-//        });
         self.lfm.getTrackInfo({
             artist: self.scrobbleData.artist,
             track: self.scrobbleData.title,
@@ -1162,27 +1169,6 @@ ControllerLastFM.prototype.updateNowPlaying = function ()
                     defer.resolve(false);  // also use resolve here, as reaction to promise should be the same right now                    
                 });
         
-
-//        // Used to notify Last.fm that a user has started listening to a track. Parameter names are case sensitive.
-//        self.lfm.scrobbleNowPlayingTrack({
-//            artist: self.scrobbleData.artist,
-//            track: self.scrobbleData.title,
-//            album: self.scrobbleData.album,
-//            duration: self.scrobbleData.duration,
-//            callback: function (result)
-//			{
-//                if (!result.success)
-//                    console.log('[LastFM] updated "now playing" failed: ', result);
-//                else
-//				{
-//                    if (debugEnabled)
-//                        self.logger.info('[LastFM] updated "now playing" | artist: ' + self.scrobbleData.artist + ' | title: ' + self.scrobbleData.title);
-//                }
-//                self.updatingNowPlaying = false;
-//            }
-//        });
-
-// lfm.scrobbleCachedData().then(resp => {console.log('Scrobbled: ',resp); console.log(lfm.getStatus());}).catch(err => console.log('Error: ', err));
         self.lfm.scrobbleCachedData().then(resp => {console.log('Scrobbled: ',resp); console.log(self.lfm.getStatus());}).catch(err => console.log('Error: ', err));
 
         // Used to notify Last.fm that a user has started listening to a track. Parameter names are case sensitive.
@@ -1207,6 +1193,10 @@ ControllerLastFM.prototype.updateNowPlaying = function ()
 	return defer.promise;
 };
 
+/** Submit active track to the scrobble cache 
+ * 
+ * @returns {.libQ@call;defer.promise}
+ */
 ControllerLastFM.prototype.scrobble = function ()
 {
 	var self = this;
@@ -1222,37 +1212,6 @@ ControllerLastFM.prototype.scrobble = function ()
 	{					
 		if(debugEnabled)
 			self.logger.info('[LastFM] preparing to scrobble...');
-
-//		self.lfm.scrobbleTrack({
-//			artist: self.scrobbleData.artist,
-//			track: self.scrobbleData.title,
-//			album: self.scrobbleData.album,
-//            timestamp: trackStartTime,
-//			callback: function(result)
-//			{
-//                if (result.success)
-//				{
-//                    if (self.scrobbleData.album == undefined || self.scrobbleData.album == '')
-//                        self.scrobbleData.album = '[unknown album]';
-//                    if (self.config.get('pushToastOnScrobble'))
-//                        self.commandRouter.pushToastMessage('success', 'Scrobble succesful', 'Scrobbled: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
-//                    if (debugEnabled)
-//                        self.logger.info('[LastFM] Scrobble successful for: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
-////                        self.logger.info('[LastFM] Scrobble successful: ' + JSON.stringify(result));
-//                }
-//                else
-//				{
-//                    console.log("in callback, finished: ", result);
-//                    if (self.config.get('pushToastOnScrobble'))
-//                        self.commandRouter.pushToastMessage('error', 'Scrobble failed', 'Tried to scrobbled: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
-//                    if (debugEnabled)
-//                        self.logger.info('[LastFM] Scrobble failed for: ' + self.scrobbleData.artist + ' - ' + self.scrobbleData.title + ' (' + self.scrobbleData.album + ').');
-//                }
-//			}
-//		});	
-//		
-
-//lfm.scrobbleToCache(track).then(resp => {console.log('Added track to cache: ',resp); console.log(lfm.getStatus());}).catch(err => console.log('Error: ', err));
 
         self.lfm.scrobbleToCache({
 			artist: self.scrobbleData.artist,
@@ -1287,9 +1246,6 @@ ControllerLastFM.prototype.scrobble = function ()
 	return defer.promise;
 };
 
-function md5(string) {
-	return crypto.createHash('md5').update(string, 'utf8').digest("hex");
-}
 
 ControllerLastFM.prototype.clearScrobbleMemory = function (remainingtimeToPlay)
 {
@@ -1300,4 +1256,8 @@ ControllerLastFM.prototype.clearScrobbleMemory = function (remainingtimeToPlay)
 		self.previousScrobble.title = '';
 	}
 	, remainingtimeToPlay);
+};
+
+function md5(string) {
+	return crypto.createHash('md5').update(string, 'utf8').digest("hex");
 }
