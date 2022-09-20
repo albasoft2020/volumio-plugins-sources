@@ -19,8 +19,7 @@
 				"API_KEY",
 				"API_SECRET",
 				"username",
-				"password",
-				"storePassword"
+				"password"
 			]
 		},
 		"content": [
@@ -35,9 +34,8 @@
 			},
 			{
 				"id":"API_SECRET",
-				"type":"text",
+				"type":"password",
 				"element": "input",
-				"doc": "Whether or not to keep the audio device alive",
 				"label": "TRANSLATE.LASTFM.API_SECRET",
 				"doc": "TRANSLATE.LASTFM.D_API_SECRET",
 				"value": ""
@@ -55,16 +53,9 @@
 				"type":"password",
 				"element": "input",
 				"label": "TRANSLATE.LASTFM.PASSWORD",
-				"doc": "TRANSLATE.LASTFM.D_PASSWORD",				
+				"doc": "TRANSLATE.LASTFM.D_PASSWORD",
+				"description": "TRANSLATE.LASTFM.DD_PASSWORD",
 				"value": ""
-			},
-			{
-			  "id":"storePassword",
-			  "element": "switch",
-			  "label": "TRANSLATE.LASTFM.STORE_PASSWORD",
-			  "doc": "TRANSLATE.LASTFM.D_STORE_PASSWORD",
-			  "description": "TRANSLATE.LASTFM.DD_STORE_PASSWORD",
-			  "value": false
 			}
 		]
 	},
