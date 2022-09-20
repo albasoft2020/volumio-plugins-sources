@@ -40,7 +40,7 @@ function ControllerLastFM(context) {
     self.previousState = { title: '| Initialising...' };
 	self.updatingNowPlaying = false;
 	self.timeToPlay = 0;
-    self.apiResponse = null;
+    //self.apiResponse = null;
     self.lfm = null;
 	self.previousScrobble = 
     {	artist: '',
@@ -165,7 +165,7 @@ ControllerLastFM.prototype.getUIConfig = function() {
 		if(self.config.get('password') != undefined && self.config.get('password') != '')
 			uiconf.sections[0].content[3].value = self.config.get('password');
 		else
-			uiconf.sections[0].content[3].value = '******';
+			uiconf.sections[0].content[3].value = ''; //'******';
 		self.logger.info("1/3 settings loaded");
 		
 		// Scrobble settings
@@ -267,22 +267,24 @@ ControllerLastFM.prototype.handleBrowseUri = function (curUri) {
     return response
         .fail(function (e) {
             self.logger.info('[LastFM] handleBrowseUri failed');
-            libQ.reject(new Error());
+            libQ.reject(e);
         });
 };
 
-// used to handle lastFM browser events
+/** Provide navigation structure for LastFM root 
+ * 
+ * @param {type} uri
+ * @returns {.libQ@call;defer.promise}
+ */
 ControllerLastFM.prototype.browseRoot = function(uri) {
-  var self = this;
-  self.fTree = [ 
-		{ label: 'Similar Artists', uri: 'similar_artist', icon: 'fa fa-users'},
-		{ label: 'Similar Tracks', uri: 'similar_tracks', icon: 'fa fa-music'}//,
+    var self = this;
+    self.fTree = [ 
+          { label: 'Similar Artists', uri: 'similar_artist', icon: 'fa fa-users'},
+          { label: 'Similar Tracks', uri: 'similar_tracks', icon: 'fa fa-music'}//,
 //		{ label: 'Settings', uri: 'settings', icon: 'fa fa-gears'}
-	];
-  var defer = libQ.defer();
+      ];
+    var defer = libQ.defer();
     var artworkTrack = self.getAlbumArt(self.scrobbleData, undefined, 'users');
-
-
 //  let duration = '';
 //  if (self.scrobbleData.duration) duration = self.scrobbleData.duration/1000 + 's';
 //  
@@ -320,28 +322,28 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
         } 
     }
   };
-  //if (self.scrobbleData.duration) rootTree.navigation.info.duration = self.scrobbleData.duration/1000 + 's';
-  if (nowPlayingTrackInfo && nowPlayingTrackInfo.wiki && nowPlayingTrackInfo.wiki.summary) rootTree.navigation.info.artist = (nowPlayingTrackInfo.wiki.summary);
-  if (nowPlayingTrackInfo && nowPlayingTrackInfo.userplaycount) rootTree.navigation.info.year = ('User played: ' + nowPlayingTrackInfo.userplaycount);
-  
-  for (var f in self.fTree) {    
-    rootTree.navigation.lists[0].items.push({
-      service: 'lastfm',
-      type: 'category',
-      title: self.fTree[f].label,
-      artist: '',
-      album: '',
-      icon: self.fTree[f].icon,
-	  albumart: '',
-      uri: 'lastfm/' + self.fTree[f].uri
-    });
-  }
+    //if (self.scrobbleData.duration) rootTree.navigation.info.duration = self.scrobbleData.duration/1000 + 's';
+    if (nowPlayingTrackInfo && nowPlayingTrackInfo.wiki && nowPlayingTrackInfo.wiki.summary) rootTree.navigation.info.artist = (nowPlayingTrackInfo.wiki.summary);
+    if (nowPlayingTrackInfo && nowPlayingTrackInfo.userplaycount) rootTree.navigation.info.year = ('User played: ' + nowPlayingTrackInfo.userplaycount);
+
+    for (var f in self.fTree) {    
+      rootTree.navigation.lists[0].items.push({
+        service: 'lastfm',
+        type: 'item-no-menu',
+        title: self.fTree[f].label,
+        artist: '',
+        album: '',
+        icon: self.fTree[f].icon,
+        albumart: '',
+        uri: 'lastfm/' + self.fTree[f].uri
+      });
+    }
     let lfmstat = self.lfm.getStatus();
     rootTree.navigation.lists[1].items.push({
         service: 'lastfm',
         type: 'item-no-menu',
         title: 'Start time',
-        icon: 'fa fa-clock',
+        icon: 'fa fa-gears', // 'fa-solid fa-circle-info',
         album: new Date(lfmstat.timestamp*1000).toLocaleString()
     });
     rootTree.navigation.lists[1].items.push({
@@ -370,6 +372,13 @@ ControllerLastFM.prototype.browseRoot = function(uri) {
   return defer.promise;
 };
 
+/** Use albumart plugin to retrieve missing artwork
+ * 
+ * @param {type} data
+ * @param {type} path
+ * @param {type} icon
+ * @returns {String}
+ */
 ControllerLastFM.prototype.getAlbumArt = function (data, path, icon) {
   if (this.albumArtPlugin == undefined) {
     // initialization, skipped from second call
@@ -444,7 +453,11 @@ ControllerLastFM.prototype.getSimilarArtists = function(uri) {
     return defer.promise;
 };
 
-// Handle getting similar track info
+/** Handle getting similar track info
+ * 
+ * @param {type} uri
+ * @returns {.libQ@call;defer.promise}
+ */
 ControllerLastFM.prototype.getSimilarTracks = function(uri) {
 	var self = this;
 	var defer = libQ.defer();
@@ -504,163 +517,14 @@ ControllerLastFM.prototype.getSimilarTracks = function(uri) {
             self.logger.info('[LastFM] failed to received response for similar tracks.' + err);	
             defer.reject(new Error('An error occurred while listing playlists'));
 		});
-        
-//        var call = self.apiCall('track.getsimilar', self.scrobbleData);
-//		call.then(function(response){
-//			
-//			var jsonResp = JSON.parse(response);
-//
-//			//self.logger.info('[LastFM] items: ' + response);
-//
-//			var artworkSearchedTrack = self.getAlbumArt(self.scrobbleData, undefined, 'fa fa-music');
-//
-//			var rootTree = 
-//			{
-//				navigation: {
-//					lists: [
-//					{
-//						availableListViews: [
-//							'grid', 'list'
-//						],
-//						items: []
-//					}],
-//					prev: {
-//						uri: 'lastfm'
-//					},
-//					info: { 
-//						uri: "search/any/" + self.scrobbleData.title, 
-//						title: 'Similar tracks to ' + self.scrobbleData.title + ' by ' + self.scrobbleData.artist, 
-//						service: 'lastfm', 
-//						type: 'album', 
-//						albumart: artworkSearchedTrack 
-//					} 
-//				}
-//			};
-//			
-//			if(jsonResp.similartracks.track.length < 1)
-//				self.commandRouter.pushToastMessage('info', "No results", "The query yielded no results, no similar track could be found for " + self.scrobbleData.artist + ' - ' + self.scrobbleData.title);
-//			
-//			var artwork = '';
-//			
-//			for (var trk in jsonResp.similartracks.track)
-//			{	
-//				//  Hmm, similarTracks does NOT return an album field; so this does not work so well:
-//				artwork = self.getAlbumArt({artist: jsonResp.similartracks.track[trk].artist.name, album: jsonResp.similartracks.track[trk].album}, undefined, 'fa fa-music');
-//				rootTree.navigation.lists[0].items.push({
-//					service: 'lastfm',
-//					type: 'track',
-//					title: jsonResp.similartracks.track[trk].name,
-//					artist: jsonResp.similartracks.track[trk].artist.name,
-//					mbid: jsonResp.similartracks.track[trk].artist.mbid,
-//					albumart: artwork,
-//					uri: "search/any/" + jsonResp.similartracks.track[trk].name
-//				});
-//			}
-//			
-//			self.logger.info('[LastFM] items: ' + JSON.stringify(rootTree.navigation.lists[0].items));
-//			defer.resolve(rootTree);
-//		})
-//		.fail(function()
-//		{
-//			defer.reject(new Error('An error occurred while listing playlists'));
-//		});
 	}
-	else
-	{
+	else {
 		defer.reject(new Error('No LastFM session key available to use'));
 		self.logger.error("[LastFM] plugin is not authenticated, please retry");
 	}	
 	return defer.promise;
 };
 
-ControllerLastFM.prototype.apiCall = function (method, predicate)
-{
-	var self = this;
-	var defer = libQ.defer();
-	var url = 'ws.audioscrobbler.com';
-	
-	self.checkURL(url)
-	.then(function (APIStatus)
-	{
-		if(APIStatus)
-		{
-			self.commandRouter.pushToastMessage('info', "Calling LastFM API", "Please standby for results (method: " + method + "), this might take a few seconds.");			
-			if(predicate != undefined && predicate.artist != undefined && predicate.title != undefined)
-			{
-				var query = '';
-				switch(method)
-				{
-					case 'artist.getsimilar':
-						query = '/2.0/?method=artist.getsimilar&artist=' + encodeURIComponent(predicate.artist).trim();
-						break;
-					case 'track.getsimilar':
-						query = '/2.0/?method=track.getsimilar&artist=' + encodeURIComponent(predicate.artist).trim() + '&track=' + encodeURIComponent(predicate.title).trim();
-						break;
-					default:
-						query = 'method = ' + method;
-						break;
-				}
-				
-				self.logger.info('Method: ' + method + ' | query: ' + query);
-				
-				if(debugEnabled)
-					self.logger.info('[LastFM] Trying to call api with method ' + method + ' and predicate: ' + JSON.stringify(predicate));
-				
-				http.get({
-						host: url,
-						port: 80,
-						path: query + '&api_key=' + self.config.get('API_KEY') + '&format=json&limit=54'
-					}, function(res) {
-						var body = '';
-						res.on('data', function(chunk) {
-							body += chunk;
-						});
-						res.on('end', function() {
-							defer.resolve(body);
-						});
-					});
-			}
-			else
-				self.logger.info('[LastFM] Predicate not set, could not populate menu for ' + method);
-		}
-		else
-		{
-			self.commandRouter.pushToastMessage('error', "Calling LastFM API failed", "Could not reach API, please check your connection and/or log files.");	
-			defer.reject(new Error('Unable to test API availability, please check the log file for more context'));
-		}
-	});
-	
-	return defer.promise;
-};
-
-// Public Methods ---------------------------------------------------------------------------------------
-
-ControllerLastFM.prototype.checkURL = function(url)
-{
-	var self = this;
-	var defer = libQ.defer();
-	try
-	{
-		var options = {method: 'HEAD', host: url, port: 80, path: '/'};
-		var req = http.request(options, function(r) {
-			if(debugEnabled)
-				self.logger.info('[LastFM] URL check (' + url + ') returned code ' + r.statusCode);
-			defer.resolve(true);
-		});
-		req.on('error', function(err) {
-			self.logger.error('[LastFM] Webresource (' + url + ') not available. ' + err);
-			defer.resolve(false);
-		});		
-		req.end();
-	}
-	catch (ex)
-	{
-		self.logger.error('[LastFM] URL availability check finished with error. ' + ex);
-		defer.reject();
-	}
-	
-	return defer.promise;
-};
 
 /** Start pausable timer used to initiate scrobbling 
  * 
@@ -1036,7 +900,11 @@ ControllerLastFM.prototype.formatScrobbleData = function (state) {
 	return success;
 };
 
-/** Initialise Last.FM session */
+/** Initialise Last.FM session
+ * 
+ * @param {type} passwd
+ * @returns {.libQ@call;defer.promise}
+ */
 ControllerLastFM.prototype.initLastFMSession = function (passwd) {
     var self = this;
 	var defer = libQ.defer();
@@ -1053,12 +921,6 @@ ControllerLastFM.prototype.initLastFMSession = function (passwd) {
         if (debugEnabled)
             self.logger.info('[LastFM] trying to authenticate...');
 
-//        self.lfm = new lastfm({
-//            api_key: self.config.get('API_KEY'),
-//            api_secret: self.config.get('API_SECRET'),
-//            username: self.config.get('username'),
-//            authToken: self.config.get('authToken')
-//        });
         self.lfm = new LastfmAPI({
             'api_key' : self.config.get('API_KEY'),
             'secret' : self.config.get('API_SECRET'),
@@ -1086,24 +948,6 @@ ControllerLastFM.prototype.initLastFMSession = function (passwd) {
                     defer.reject(msg);
                 });
         }
-
-//        self.lfm.getSessionKey(function (result)
-//		{
-//            if (result.success)
-//			{
-//                self.commandRouter.pushToastMessage('success', 'LastFM connection', 'Authenticated successfully with LastFM.');
-//                if (debugEnabled)
-//                    self.logger.info('[LastFM] authenticated successfully!');
-//                defer.resolve(result.session_key);
-//            }
-//            else
-//			{
-//                msg = 'Error: ' + result.error;
-//                self.commandRouter.pushToastMessage('error', 'LastFM connection failed', msg);                    
-//                self.logger.error('[LastFM] ' + msg); 
-//                defer.reject(msg);
-//            }
-//        });
     }
     else
 	{
