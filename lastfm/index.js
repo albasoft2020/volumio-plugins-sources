@@ -81,7 +81,9 @@ ControllerLastFM.prototype.getConfigurationFiles = function()
 
 ControllerLastFM.prototype.onStop = function() {
 	var self = this;
-	self.logger.info("Performing onStop action");
+        
+    self.commandRouter.volumioRemoveToBrowseSources('Last.fm');
+    if (debugEnabled) self.logger.info("[LastFM] Removed Last.fm browser option");
 	
 	return libQ.resolve();
 };
@@ -235,7 +237,7 @@ ControllerLastFM.prototype.setConf = function(conf) {
  */
 ControllerLastFM.prototype.addToBrowseSources = function () {
     var data = { 
-		name: 'LastFM', 
+		name: 'Last.fm', 
 		uri: 'lastfm', 
 		plugin_type: 'user_interface', 
 		plugin_name: 'lastfm',
