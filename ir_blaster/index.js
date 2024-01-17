@@ -53,7 +53,8 @@ ir_blaster.prototype.onStart = function() {
     }
     self.logger.info('[IR-Blaster] Loaded configuration: ' + JSON.stringify(self.config.data));
     useScript = self.config.get('useScript', true);
-
+    self.addToBrowseSources();
+    
     remote.name = self.config.get('remotename');  
     remote.gpio_pin = self.config.get('gpio_pin');
     // get lirc remote name
@@ -83,6 +84,8 @@ ir_blaster.prototype.onStop = function() {
     } else {
 
     }
+    self.commandRouter.volumioRemoveToBrowseSources('IR blaster');
+
     // Once the Plugin has successfully stopped resolve the promise
     defer.resolve();
 
@@ -96,6 +99,75 @@ ir_blaster.prototype.onRestart = function() {
 
 
 // Configuration Methods -----------------------------------------------------------------------------
+ir_blaster.prototype.addToBrowseSources = function () {
+    var self = this;
+
+    var data = {name: 'IR blaster', uri: 'IR_Blaster://',plugin_type:'miscellanea',plugin_name:'ir_blaster',albumart:'/albumart?sectionimage=miscellanea/ir_blaster/misc/remote-control.svg'};
+    self.logger.info('[IR-Blaster] Adding browse source with: ' + JSON.stringify(data));
+    return self.commandRouter.volumioAddToBrowseSources(data);
+};
+
+// required to handle lastFM browser events
+ir_blaster.prototype.handleBrowseUri = function (curUri) {
+    var self = this;
+    let rootTree = {
+            navigation: {
+              lists: [
+                {
+                  availableListViews: [
+                    'grid', "list"
+                  ],
+                  items: [
+                    {
+                        "type": "item-no-menu",
+                        "title": "On/Off",
+                        "icon": "fa fa-power-off",
+                        "uri": "IR_Blaster://KEY_POWER"
+                    },
+                    {
+                        "type": "item-no-menu",
+                        "title": "Volume down",
+                        "icon": "fa fa-volume-down",
+                        "uri": "IR_Blaster://KEY_VOLUMEDOWN"
+                    },
+                    {
+                        "type": "item-no-menu",
+                        "title": "Volume up",
+                        "icon": "fa fa-volume-up",
+                        "uri": "IR_Blaster://KEY_VOLUMEUP"
+                    },
+                    {
+                        "type": "item-no-menu",
+                        "title": "Mute",
+                        "icon": "fa fa-volume-off",
+                        "uri": "IR_Blaster://KEY_MUTE"
+                    },
+                    {
+                        "type": "item-no-menu",
+                        "title": "Dim",
+                        "icon": "fa fa-lightbulb-o",
+                        "uri": "IR_Blaster://KEY_BRIGHTNESS_CYCLE"
+                    }
+                  ]
+                }
+              ],
+              prev: {
+                uri: '/'
+              }
+            }
+          };
+    let cmd =curUri.split('/').pop(); 
+    self.logger.info(`[IR-Blaster] Browsed to ${curUri}`);
+    if (cmd !== ''){
+        self.logger.info('[IR-Blaster] Send command '+ cmd);
+        self.sendRemoteCommand(cmd);
+    }
+    return libQ.resolve(rootTree);
+//        .fail(function (e) {
+//            self.logger.info('[IR-Blaster] handleBrowseUri failed');
+//            libQ.reject(new Error());
+//        });
+};
 
 ir_blaster.prototype.getUIConfig = function() {
     var defer = libQ.defer();
